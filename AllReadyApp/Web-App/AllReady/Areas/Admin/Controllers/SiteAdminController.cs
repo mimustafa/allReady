@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -18,16 +18,19 @@ using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
+using AllReady.Constants;
 using AllReady.Features.Campaigns;
 using AllReady.Features.Events;
 using AllReady.Features.Tasks;
 
 namespace AllReady.Areas.Admin.Controllers
 {
-    [Area("Admin")]
-    [Authorize("SiteAdmin")]
+    [Area(AreaNames.Admin)]
+    [Authorize(nameof(UserType.SiteAdmin))]
     public class SiteController : Controller
     {
+        public Func<DateTime> DateTimeNow = () => DateTime.Now;
+
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly ILogger<SiteController> _logger;
         private readonly IMediator _mediator;
@@ -50,8 +53,8 @@ namespace AllReady.Areas.Admin.Controllers
             var user = await _mediator.SendAsync(new UserQuery { UserId = userId });
             var campaigns = await _mediator.SendAsync(new CampaignByApplicationUserIdQuery() { ApplicationUserId = userId });
             var events = await _mediator.SendAsync(new EventsByApplicationUserIdQuery() { ApplicationUserId = userId });
-            var tasks = await _mediator.SendAsync(new TasksByApplicationUserIdQuery() { ApplicationUserId = userId });
-            
+            var volunteerTasks = await _mediator.SendAsync(new VolunteerTasksByApplicationUserIdQuery() { ApplicationUserId = userId });
+
             var viewModel = new DeleteUserViewModel
             {
                 UserId = userId,
@@ -61,7 +64,7 @@ namespace AllReady.Areas.Admin.Controllers
                 IsOrganizationAdmin = user.IsOrganizationAdmin,
                 Campaigns = campaigns?.Select(x => x.Name),
                 Events = events?.Select(x => x.Name),
-                Tasks = tasks?.Select(x => x.Name)
+                VolunteerTasks = volunteerTasks?.Select(x => x.Name)
             };
 
             return View(viewModel);
@@ -120,7 +123,7 @@ namespace AllReady.Areas.Admin.Controllers
 
             await _mediator.SendAsync(new UpdateUser { User = user });
 
-            var organizationAdminClaim = new Claim(Security.ClaimTypes.UserType, "OrgAdmin");
+            var organizationAdminClaim = new Claim(Security.ClaimTypes.UserType, nameof(UserType.OrgAdmin));
             if (viewModel.IsOrganizationAdmin)
             {
                 //add organization admin claim
@@ -128,7 +131,7 @@ namespace AllReady.Areas.Admin.Controllers
                 if (result.Succeeded)
                 {
                     //mgmccarthy: there is no Login action method on the AdminController. The only login method I could find is on the AccountController. Not too sure what to do here
-                    var callbackUrl = Url.Action(new UrlActionContext { Action = "Login", Controller = "Admin", Values = new { Email = user.Email }, Protocol = HttpContext.Request.Scheme });
+                    var callbackUrl = Url.Action(new UrlActionContext { Action = nameof(AllReady.Controllers.AccountController.Login), Controller = "Account", Values = new { Email = user.Email }, Protocol = HttpContext.Request.Scheme });
                     await _mediator.SendAsync(new SendAccountApprovalEmailCommand { Email = user.Email, CallbackUrl = callbackUrl });
                 }
                 else
@@ -149,6 +152,19 @@ namespace AllReady.Areas.Admin.Controllers
             return RedirectToAction(nameof(Index));
         }
 
+
+        [HttpGet]
+        public async Task<IActionResult> UnlockUser(string userId)
+        {
+            var user = await GetUser(userId);
+            if (user?.LockoutEnd > DateTimeNow())
+            {
+                await _userManager.SetLockoutEndDateAsync(user, DateTimeNow().Date.AddDays(-1));
+            }
+            return RedirectToAction(nameof(Index));
+        }
+
+
         //TODO: This should be an HttpPost but that also requires changes to the view that is calling this
         [HttpGet]
         public async Task<IActionResult> ResetPassword(string userId)
@@ -164,7 +180,7 @@ namespace AllReady.Areas.Admin.Controllers
 
                 var code = await _userManager.GeneratePasswordResetTokenAsync(user);
                 //TODO: mgmccarthy: there is no ResetPassword action methd on the AdminController. Not too sure what to do here. Waiting for feeback via Issue #659
-                var callbackUrl = Url.Action(new UrlActionContext { Action = "ResetPassword", Controller = "Admin", Values = new { userId = user.Id, code = code }, Protocol = HttpContext.Request.Scheme });
+                var callbackUrl = Url.Action(new UrlActionContext { Action = nameof(AllReady.Controllers.AccountController.ResetPassword), Controller = "Account", Values = new { userId = user.Id, code = code }, Protocol = HttpContext.Request.Scheme });
                 await _mediator.SendAsync(new Features.Site.SendResetPasswordEmailCommand { Email = user.Email, CallbackUrl = callbackUrl });
 
                 ViewBag.SuccessMessage = $"Sent password reset email for {user.UserName}.";
@@ -186,7 +202,7 @@ namespace AllReady.Areas.Admin.Controllers
             try
             {
                 var user = await GetUser(userId);
-                await _userManager.AddClaimAsync(user, new Claim(Security.ClaimTypes.UserType, UserType.SiteAdmin.ToName()));
+                await _userManager.AddClaimAsync(user, new Claim(Security.ClaimTypes.UserType, nameof(UserType.SiteAdmin)));
                 return RedirectToAction(nameof(Index));
             }
             catch (Exception ex)
@@ -203,7 +219,7 @@ namespace AllReady.Areas.Admin.Controllers
             try
             {
                 var user = await GetUser(userId);
-                await _userManager.AddClaimAsync(user, new Claim(Security.ClaimTypes.UserType, UserType.ApiAccess.ToName()));
+                await _userManager.AddClaimAsync(user, new Claim(Security.ClaimTypes.UserType, nameof(UserType.ApiAccess)));
                 return RedirectToAction(nameof(Index));
             }
             catch (Exception ex)
@@ -286,7 +302,7 @@ namespace AllReady.Areas.Admin.Controllers
                 var organizations = await _mediator.SendAsync(new AllOrganizationsQuery());
                 if (organizations.Any(t => t.Id == model.OrganizationId))
                 {
-                    await _userManager.AddClaimAsync(user, new Claim(Security.ClaimTypes.UserType, UserType.OrgAdmin.ToName()));
+                    await _userManager.AddClaimAsync(user, new Claim(Security.ClaimTypes.UserType, nameof(UserType.OrgAdmin)));
                     await _userManager.AddClaimAsync(user, new Claim(Security.ClaimTypes.Organization, model.OrganizationId.ToString()));
                     return RedirectToAction(nameof(Index));
                 }
@@ -303,7 +319,7 @@ namespace AllReady.Areas.Admin.Controllers
             try
             {
                 var user = await GetUser(userId);
-                await _userManager.RemoveClaimAsync(user, new Claim(Security.ClaimTypes.UserType, UserType.SiteAdmin.ToName()));
+                await _userManager.RemoveClaimAsync(user, new Claim(Security.ClaimTypes.UserType, nameof(UserType.SiteAdmin)));
                 return RedirectToAction(nameof(Index));
             }
             catch (Exception ex)

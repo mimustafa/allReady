@@ -1,4 +1,5 @@
-﻿@using AllReady.Security
+@using AllReady.Security
+@using Microsoft.AspNetCore.Mvc.Rendering
 @model AllReady.ViewModels.Event.EventViewModel
 
 @{
@@ -9,6 +10,9 @@
 <div class="row">
     <div class="col-12">
         <ol class="breadcrumb">
+            <li><a asp-page="/Index">Home</a></li>
+            <li><a asp-controller="Organization" asp-action="Index">Organizations</a></li>
+            <li><a asp-controller="Organization" asp-action="ShowOrganization" asp-route-id="@Model.OrganizationId">@Model.OrganizationName</a></li>
             <li><a asp-controller="Campaign" asp-action="Index">Campaigns</a></li>
             <li><a asp-controller="Campaign" asp-action="Details" asp-route-id="@Model.CampaignId">@Model.CampaignName</a></li>
             <li>@Model.Title</li>
@@ -17,7 +21,6 @@
 </div>
 
 <div id="MainView">
-
     @Html.Partial("_Alert")
 
     <!-- Body -->
@@ -61,7 +64,7 @@
                     <p>@Model.Description</p>
                 </div>
             </div>
-            <div class="row" id="CampaignInfo" data-bind="accordion">
+            <div class="row" id="CampaignInfo" data-bind="accordion: { openItem : 0 }">
                 <div class="panel-group">
                     <div data-toggle-accordion>
                         <div class="panel-heading col-sm-12" >
@@ -95,7 +98,7 @@
             {
                 @*User Tasks*@
                 <div class="row">
-                    <div data-bind="visible: filteredUserTasks().filtered().length > 0">
+                    <div>
                         <div class="col-sm-12">
                             <h3>My Assigned Tasks</h3>
                         </div>
@@ -216,6 +219,14 @@
                             <input type="text" class="form-control input-sm" data-bind="textInput: tasks.searchTerm" placeholder="Search tasks" />
                         </div>
                         <div class="form-group">
+                            <div class="input-group" data-bind="dateRangePicker: tasks.dateInRange, daterangepickerOptions: {  autoUpdateInput: false, locale: { cancelLabel: 'Clear', format: 'L' } }" >
+                                <input type="text" class="form-control input-sm" placeholder="On date" data-bind="value: tasks.displayedRange" />
+                                <span class="input-group-addon">
+                                    <span class="glyphicon glyphicon-calendar"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="form-group">
                             <button type="button" class="btn btn-default btn-sm" data-bind="css: { active: tasks.showOld }, click: tasks.showOld.toggle">
                                 <i class="fa" data-bind="css: { 'fa-square-o': !tasks.showOld(), 'fa-check-square-o': tasks.showOld }"></i>
                                 Show Closed Tasks
@@ -281,11 +292,25 @@
                     </div>
                 </div>
             </div>
-
         </div>
 
         <!-- Column 2 -->
-        @Html.Partial("_LocationInfo", Model)
+        <div class="col-sm-4">
+            <div class="row share-buttons">
+                <a href="mailto:?subject=Check out this event! '@Model.Title'&body=Check it out at @ViewBag.AbsoluteUrl" title="Share by Email">
+                    <img src="~/images/share-email.png">
+                </a>
+                <a href="http://twitter.com/intent/tweet?text=@("Check out this event! '" + Model.Title + "'")&url=@ViewBag.AbsoluteUrl&via=htbox" title="Share via Twitter">
+                    <img src="~/images/share-twitter.png" alt="Share via Twitter" />
+                </a>
+                <a href="https://www.facebook.com/sharer/sharer.php?u=@ViewBag.AbsoluteUrl" title="Share via Facebook" target="_blank">
+                    <img src="~/images/share-fb.png" alt="Share via Facebook" />
+                </a>
+            </div>
+            <div class="row">
+                @Html.Partial("_LocationInfo", Model)
+            </div>
+        </div>
     </div>
 </div>
 

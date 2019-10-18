@@ -23,7 +23,7 @@ namespace AllReady.Areas.Admin.Features.Requests
             var request = await context.Requests.SingleOrDefaultAsync(x => notification.RequestId == x.RequestId && x.Source == RequestSource.Api);
             if (request != null)
             {
-                if (notification.NewStatus == RequestStatus.Completed || notification.NewStatus == RequestStatus.Canceled || notification.NewStatus == RequestStatus.Assigned || notification.NewStatus == RequestStatus.Unassigned)
+                if (notification.NewStatus == RequestStatus.Completed || notification.NewStatus == RequestStatus.Canceled || notification.NewStatus == RequestStatus.Assigned || notification.NewStatus == RequestStatus.Unassigned || notification.NewStatus == RequestStatus.Requested)
                 {
                     var gasaStatus = string.Empty;
                     var acceptance = false;
@@ -31,19 +31,22 @@ namespace AllReady.Areas.Admin.Features.Requests
                     switch (notification.NewStatus)
                     {
                         case RequestStatus.Completed:
-                            gasaStatus = "installed";
+                            gasaStatus = GasaStatus.Installed;
                             acceptance = true;
                             break;
                         case RequestStatus.Canceled:
-                            gasaStatus = "canceled";
+                            gasaStatus = GasaStatus.Canceled;
                             acceptance = true;
                             break;
                         case RequestStatus.Assigned:
-                            gasaStatus = "in progress";
+                            gasaStatus = GasaStatus.InProgress;
                             acceptance = true;
                             break;
                         case RequestStatus.Unassigned:
-                            gasaStatus = "new";
+                            gasaStatus = GasaStatus.New;
+                            break;
+                        case RequestStatus.Requested:
+                            gasaStatus = GasaStatus.Requested;
                             break;
                     }
 

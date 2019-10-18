@@ -1,9 +1,9 @@
-﻿module Pages
+module Pages
 open canopy
 
 module TopMenu =
     let private Campaigns = "Campaigns"
-    let private Admin = "li.dropdown-admin"
+    let private Admin = "li.dropdown-admin a"
     let private AdminCampaigns = "a[href='/Admin/Campaign']"
     let private AdminOrganizations = "a[href='/Admin/Organization']"
 
@@ -42,8 +42,10 @@ module AdminCampaignCreate =
     type CampaignDetails = {
         Name:string
         Description:string
+        Headline:string
         FullDescription:string
         OrganizationName:string
+        Address1:string
         City:string
         State:string
         PostalCode:int
@@ -54,7 +56,9 @@ module AdminCampaignCreate =
         Name = ""
         Description = ""
         FullDescription = ""
+        Headline = ""
         OrganizationName = ""
+        Address1="1 Microsoft Way"
         City="Redmond"
         State="WA"
         PostalCode=98052
@@ -68,10 +72,13 @@ module AdminCampaignCreate =
     let PopulateCampaignDetails details =
         "#Name" << details.Name
         "#Description" << details.Description
+        "#Headline" << details.Headline
         press tab
         let insertFullDescriptionScript = sprintf "tinyMCE.activeEditor.setContent('%s')" details.FullDescription
         js(insertFullDescriptionScript) |> ignore
         "#OrganizationId" << details.OrganizationName
+        check "#Published"
+        "#Location_Address1" << details.Address1
         "#Location_City" << details.City
         "#Location_State" << details.State
         "#Location_PostalCode" << details.PostalCode.ToString()
@@ -80,16 +87,20 @@ module AdminCampaignCreate =
 module AdminCampaignDetails =
     let RelativeUrl = "Admin/Campaign/Details"
 
-    let private createNew = "Create New"
+    let private createNew = "a[href^='/Admin/Event/Create/']"
 
     let CreateNewEvent _ =
         click createNew
 
 module AdminOrganizationCreate =
+    let privicyPolicyFieldVisible () =
+        (elements "#pp-url").Length = 1
+
     type OrganizationDetails = {
         Name:string
         WebUrl:string
         LogoUrl:string
+        Address1:string
         City:string
         State:string
         PostalCode:int
@@ -100,6 +111,7 @@ module AdminOrganizationCreate =
         Name = ""
         WebUrl=""
         LogoUrl=""
+        Address1="1 Microsoft Way"
         City="Redmond"
         State="WA"
         PostalCode=98052
@@ -111,10 +123,13 @@ module AdminOrganizationCreate =
         "#LogoUrl" << details.LogoUrl
         "#Name" << details.Name 
         "#WebUrl" << details.WebUrl
+        "#Location_Address1" << details.Address1
         "#Location_City" << details.City
         "#Location_State" << details.State
         "#Location_PostalCode" << details.PostalCode.ToString()
         "#Location_Country" << details.Country
+        click "Link to an external policy"
+        waitFor privicyPolicyFieldVisible
         "#PrivacyPolicyUrl" << details.PrivacyPolicyUrl
 
     let Save _ =
@@ -149,8 +164,8 @@ module AdminEventCreate =
 
     let PopulateEventdetails details =
         "#Name" << details.Name
-        "#StartDateTime" << details.StartDate.ToString()
-        "#EndDateTime" << details.EndDate.ToString()
+        "#StartDateTime" << details.StartDate.ToString("MM/dd/yyyy")
+        "#EndDateTime" << details.EndDate.ToString("MM/dd/yyyy")
         "#EventType" << details.EventType.ToString()
         "#Location_City" << details.City
         "#Location_State" << details.State
@@ -177,15 +192,15 @@ module AdminTaskCreate =
         Description = ""
         VolunteersRequired = 1
         StartDate = System.DateTime.Now.AddDays(1.0)
-        EndDate = System.DateTime.Now.AddDays(5.0)
+        EndDate = System.DateTime.Now.AddDays(4.0)
     }
 
     let PopulateTaskDetails details =
         "#Name" << details.Name
         "#Description" << details.Description
         "#NumberOfVolunteersRequired" << details.VolunteersRequired.ToString()
-        "#StartDateTime" << details.StartDate.ToString()
-        "#EndDateTime" << details.EndDate.ToString()
+        "#StartDateTime" << details.StartDate.ToString("MM/dd/yyyy h:mm tt")
+        "#EndDateTime" << details.EndDate.ToString("MM/dd/yyyy h:mm tt")
 
     let private createBtn = "Save"
 
@@ -204,4 +219,3 @@ module AdminTaskDetails =
     let RelativeUrl = "Admin/Task/Details"
 
 
-    

@@ -3,5 +3,11 @@
 
 node_modules/
 platforms/
+bin/
+bld/
 plugins/
-www/lib/**
+simulation/
+vs/
+.sourcemaps/
+*.jsproj.user
+.editorconfig

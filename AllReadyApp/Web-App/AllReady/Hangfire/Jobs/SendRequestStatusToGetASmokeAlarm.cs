@@ -1,44 +1,48 @@
-﻿using System.Net.Http;
+using System.Net.Http;
 using System.Net.Http.Headers;
+using AllReady.Configuration;
 using Microsoft.Extensions.Options;
+using AllReady.Services;
+using Newtonsoft.Json;
+using System.Text;
+using System.Threading.Tasks;
 
 namespace AllReady.Hangfire.Jobs
 {
     public class SendRequestStatusToGetASmokeAlarm : ISendRequestStatusToGetASmokeAlarm
     {
-        private readonly IOptions<GetASmokeAlarmApiSettings> getASmokeAlarmApiSettings;
-        private static HttpClient httpClient;
+        private readonly GetASmokeAlarmApiSettings _getASmokeAlarmApiSettings;
+        private readonly IHttpClient _httpClient;
 
-        public SendRequestStatusToGetASmokeAlarm(IOptions<GetASmokeAlarmApiSettings> getASmokeAlarmApiSettings)
+        public SendRequestStatusToGetASmokeAlarm(IOptions<GetASmokeAlarmApiSettings> getASmokeAlarmApiSettings, IHttpClient httpClient)
         {
-            this.getASmokeAlarmApiSettings = getASmokeAlarmApiSettings;
-            CreateStaticHttpClient(getASmokeAlarmApiSettings);
+            _getASmokeAlarmApiSettings = getASmokeAlarmApiSettings.Value;
+            _httpClient = httpClient;
         }
 
-        public void Send(string serial, string status, bool acceptance)
+        public async Task Send(string serial, string status, bool acceptance)
         {
-            var updateRequestMessage = new { acceptance, status };
-            var response = httpClient.PostAsJsonAsync($"{getASmokeAlarmApiSettings.Value.BaseAddress}admin/requests/status/{serial}", updateRequestMessage).Result;
-
-            //throw HttpRequestException if response is not a success code.
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{_getASmokeAlarmApiSettings.BaseAddress}admin/requests/status/{serial}")
+            {
+                Content = new StringContent(JsonConvert.SerializeObject(new { acceptance, status }), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = AuthenticationHeaderValue.Parse(_getASmokeAlarmApiSettings.Token);
+            var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
         }
+    }
 
-        private void CreateStaticHttpClient(IOptions<GetASmokeAlarmApiSettings> getASmokeAlarmApiSettings)
-        {
-            if (httpClient == null)
-            {
-                //TODO mgmccarthy: the one drawback to setting HttpClient to static is when the authentication token changes. I THINK we would need to reload the web appliation for the changes to take place?
-                httpClient = new HttpClient();
-                httpClient.DefaultRequestHeaders.Accept.Clear();
-                httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                httpClient.DefaultRequestHeaders.Add("Authorization", getASmokeAlarmApiSettings.Value.Token);
-            }
-        }
+    public static class GasaStatus
+    {
+        public const string New = "new";
+        public const string InProgress = "in progress";
+        public const string Installed = "";
+        public const string Canceled = "canceled";
+        public const string Requested = "requested";
     }
 
     public interface ISendRequestStatusToGetASmokeAlarm
     {
-        void Send(string serial, string status, bool acceptance);
+        Task Send(string serial, string status, bool acceptance);
     }
 }

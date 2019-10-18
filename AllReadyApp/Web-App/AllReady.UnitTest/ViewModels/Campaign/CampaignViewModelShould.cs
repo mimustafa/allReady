@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using AllReady.Models;
 using AllReady.ViewModels.Campaign;
@@ -14,8 +14,8 @@ namespace AllReady.UnitTest.ViewModels.Campaign
         [Fact]
         public void ReturnImmediately_WhenConstructingWithNullCampaign()
         {
-            var sut = new CampaignViewModel(null);
-            Assert.Equal(sut.Id, 0);
+            var sut = new CampaignViewModel((Campaign)null);
+            Assert.Equal(0, sut.Id);
         }
 
         [Fact]
@@ -51,7 +51,7 @@ namespace AllReady.UnitTest.ViewModels.Campaign
         public void SetManagingOrganizationIdToZero_WhenCampaignsManagingOrganizationIsNotNull_AndIdIsZero()
         {
             var sut = new CampaignViewModel(new Campaign { ManagingOrganization = new Organization() });
-            Assert.Equal(sut.ManagingOrganizationId, 0);
+            Assert.Equal(0, sut.ManagingOrganizationId);
         }
 
         [Fact]
@@ -66,7 +66,7 @@ namespace AllReady.UnitTest.ViewModels.Campaign
         public void SetManagingOrganizationIdToZero_WhenCampaignsManagingOrganizationIsNull()
         {
             var sut = new CampaignViewModel(new Campaign());
-            Assert.Equal(sut.ManagingOrganizationId, 0);
+            Assert.Equal(0, sut.ManagingOrganizationId);
         }
 
         [Fact]

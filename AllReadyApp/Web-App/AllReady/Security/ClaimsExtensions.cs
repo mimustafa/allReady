@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Security.Claims;
 using AllReady.Models;
+using TimeZoneConverter;
 using Microsoft.AspNetCore.Identity;
 
 namespace AllReady.Security
@@ -44,16 +45,16 @@ namespace AllReady.Security
         public static string GetTimeZoneId(this ClaimsPrincipal user)
         {
             var timeZoneIdClaim = user.Claims.FirstOrDefault(c => c.Type == ClaimTypes.TimeZoneId);
-            return timeZoneIdClaim?.Value;
-            }
+            return timeZoneIdClaim == null ? "UTC" : timeZoneIdClaim.Value;
+        }
 
         public static bool IsUserProfileIncomplete(this ClaimsPrincipal user) =>
-            user.HasClaim(c => c.Type == ClaimTypes.ProfileIncomplete);                        
+            user.HasClaim(c => c.Type == ClaimTypes.ProfileIncomplete);
 
         public static TimeZoneInfo GetTimeZoneInfo(this ClaimsPrincipal user)
         {
             var timeZoneId = user.GetTimeZoneId();
-            return !string.IsNullOrEmpty(timeZoneId) ? TimeZoneInfo.FindSystemTimeZoneById(timeZoneId) : null;
+            return !string.IsNullOrEmpty(timeZoneId) ? TZConvert.GetTimeZoneInfo(timeZoneId) : null;
         }
 
         public static string GetDisplayName(this ClaimsPrincipal user, UserManager<ApplicationUser> userManager)

@@ -1,4 +1,4 @@
-﻿///<reference path="../lib/jquery/dist/jquery.js" />
+///<reference path="../lib/jquery/dist/jquery.js" />
 ///<reference path="../lib/knockout/dist/knockout.js" />
 ///<reference path="../lib/moment/moment.js" />
 
@@ -29,6 +29,40 @@ ko.observableArray.fn.filterBeforeDate = function (dateProperty, showOld, date) 
         return ko.utils.arrayFilter(observableArray(), function (item) {
             return (showOld() || moment(item[dateProperty]).isAfter(moment(date || undefined))) && (!hideFull() || !item.IsFull);
         });
+    });
+};
+
+ko.observableArray.fn.filterOnDateRange = function (beginDateProperty, endDateProperty) {
+    var dateInRange = ko.observable("");
+    this.dateInRange = dateInRange;
+
+    this.displayedRange = ko.computed(function() {
+        var selectedDateRange = this.dateInRange();
+        return selectedDateRange.formattedDate;
+    }, this);
+
+    return this.filterList(function (observableArray) {
+        var selectedBeginDate, selectedEndDate;
+        var selectedDateRange = dateInRange();
+        if (selectedDateRange.begin && selectedDateRange.end) {
+            selectedBeginDate = moment(selectedDateRange.begin);
+            selectedEndDate = moment(selectedDateRange.end);
+
+            selectedBeginDate.startOf("day");
+            selectedEndDate.endOf("day");
+
+            return ko.utils.arrayFilter(observableArray(), function (item) {
+                var beginDate = moment(item[beginDateProperty]),
+                    endDate = moment(item[endDateProperty]);
+                beginDate.startOf("day");
+                endDate.endOf("day");
+                return selectedBeginDate.isBefore(endDate) &&
+                    selectedEndDate.isAfter(beginDate);
+            });
+        }
+        else {
+            return observableArray();
+        }
     });
 };
 

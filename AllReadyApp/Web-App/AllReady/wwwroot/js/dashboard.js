@@ -1,6 +1,6 @@
 ﻿///<reference path="../lib/jquery/dist/jquery.js" />
 (function ($) {
-    $('#calendarr').fullCalendar({
+    $('#calendar').fullCalendar({
         header: {
             left: 'prev,next today',
             center: 'title',
@@ -33,3 +33,42 @@
     });
 
 })($);
+
+$(document).ready(function () {
+
+    $('#VolunteerTable').dataTable({
+        dom: 'Bfrtip',
+        serverSide: false,
+        processing: true,
+        ajax: 
+        {
+            "type": "GET",
+            "url": "../../api/volunteer",
+            "contentType": "application/json; charset=utf-8",
+            "dataSrc": "" 
+        },
+        columns: [
+
+               { "data": "WorkflowState" },
+               { "data": "Name" },
+               { "data": "Location" },
+               { "data": "NumberOfTasks" },
+               { "data": "NumberOfVolunteers" },
+        ],
+        select: true,
+        buttons: [               
+               {
+                   extend: 'collection',
+                   text: 'Export',
+                   buttons: [
+                       'copy',
+                       'excel',
+                       'csv',
+                       'pdf',
+                       'print'
+                   ]
+               }
+           ]    
+    },
+    );
+}); 

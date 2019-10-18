@@ -1,4 +1,5 @@
-﻿@model AllReady.Areas.Admin.ViewModels.Import.IndexViewModel
+﻿@using AllReady.Constants
+@model AllReady.Areas.Admin.ViewModels.Import.IndexViewModel
 
 @{
     ViewData["Title"] = "Import Data";
@@ -59,10 +60,10 @@
 </p>
 
 <pre>
-    "id","name","address","city","state","zip","phone","email","date created","region","latitude","longitude"
+    "id","name","address","city","state","postalcode","phone","email","date created","region","latitude","longitude"
 </pre>
 
-<form method="post" asp-action="Index" asp-controller="Import" asp-area="Admin" enctype="multipart/form-data">
+<form method="post" asp-action="Index" asp-controller="Import" asp-area="@AreaNames.Admin" enctype="multipart/form-data">
     @for (var i = 0; i < Model.Events.Count; i++)
     {
         @Html.HiddenFor(model => model.Events[i].Value)

@@ -1,10 +1,12 @@
-﻿using System;
+using System;
 using System.Linq;
-using AllReady.Features.Requests;
+using System.Threading.Tasks;
+using AllReady.Configuration;
 using AllReady.Models;
+using AllReady.Services.Mapping.GeoCoding;
 using AllReady.ViewModels.Requests;
-using Geocoding;
-using MediatR;
+using Hangfire;
+using Microsoft.Extensions.Options;
 
 namespace AllReady.Hangfire.Jobs
 {
@@ -14,21 +16,27 @@ namespace AllReady.Hangfire.Jobs
         public Func<DateTime> DateTimeUtcNow = () => DateTime.UtcNow;
 
         private readonly AllReadyContext context;
-        private readonly IMediator mediator;
-        private readonly IGeocoder geocoder;
+        private readonly IGeocodeService geocoder;
+        private readonly IBackgroundJobClient backgroundJobClient;
+        private readonly ApprovedRegionsSettings approvedRegions;
 
-        public ProcessApiRequests(AllReadyContext context, IMediator mediator, IGeocoder geocoder)
+        public ProcessApiRequests(AllReadyContext context, IGeocodeService geocoder, IOptions<ApprovedRegionsSettings> approvedRegions, IBackgroundJobClient backgroundJobClient)
         {
             this.context = context;
-            this.mediator = mediator;
             this.geocoder = geocoder;
+            this.backgroundJobClient = backgroundJobClient;
+            this.approvedRegions = approvedRegions.Value;
         }
 
-        public void Process(RequestApiViewModel viewModel)
+        public async Task Process(RequestApiViewModel viewModel)
         {
             //since this is Hangfire job code, it needs to be idempotent, this could be re-tried if there is a failure
-            var requestExists = context.Requests.Any(x => x.ProviderRequestId == viewModel.ProviderRequestId);
-            if (!requestExists)
+            if (context.Requests.Any(x => x.ProviderRequestId == viewModel.ProviderRequestId))
+                return;
+
+            var requestIsFromApprovedRegion = RequestIsFromApprovedRegion(viewModel.ProviderData);
+
+            if (requestIsFromApprovedRegion)
             {
                 var request = new Request
                 {
@@ -44,26 +52,33 @@ namespace AllReady.Hangfire.Jobs
                     Name = viewModel.Name,
                     Phone = viewModel.Phone,
                     State = viewModel.State,
-                    Zip = viewModel.Zip,
+                    PostalCode = viewModel.PostalCode,
                     Status = RequestStatus.Unassigned,
                     Source = RequestSource.Api
                 };
 
                 //this is a web service call
-                var address = geocoder.Geocode(viewModel.Address, viewModel.City, viewModel.State, viewModel.Zip, string.Empty).FirstOrDefault();
-                request.Latitude = address?.Coordinates.Latitude ?? 0;
-                request.Longitude = address?.Coordinates.Longitude ?? 0;
+                var coordinates = await geocoder.GetCoordinatesFromAddress(request.Address, request.City, request.State, request.PostalCode, string.Empty);
+
+                request.Latitude = coordinates?.Latitude ?? 0;
+                request.Longitude = coordinates?.Longitude ?? 0;
 
                 context.Add(request);
                 context.SaveChanges();
+            }
 
-                mediator.Publish(new ApiRequestProcessedNotification { RequestId = request.RequestId });
-            }   
+            //acceptance is true if we can service the Request or false if can't service it 
+            backgroundJobClient.Enqueue<ISendRequestStatusToGetASmokeAlarm>(x => x.Send(viewModel.ProviderRequestId, GasaStatus.New, requestIsFromApprovedRegion));
+        }
+
+        private bool RequestIsFromApprovedRegion(string providerData)
+        {
+            return !approvedRegions.Enabled || approvedRegions.Regions.Contains(providerData);
         }
     }
 
     public interface IProcessApiRequests
     {
-        void Process(RequestApiViewModel viewModel);
+        Task Process(RequestApiViewModel viewModel);
     }
 }

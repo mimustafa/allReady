@@ -1,13 +1,12 @@
-﻿using AllReady.Models;
+using AllReady.Areas.Admin.ViewModels.Event;
+using AllReady.Areas.Admin.ViewModels.Itinerary;
+using AllReady.Areas.Admin.ViewModels.Shared;
+using AllReady.Areas.Admin.ViewModels.VolunteerTask;
+using AllReady.Models;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using System.Linq;
 using System.Threading.Tasks;
-using AllReady.Areas.Admin.ViewModels.Event;
-using AllReady.Areas.Admin.ViewModels.Itinerary;
-using AllReady.Areas.Admin.ViewModels.Shared;
-using AllReady.Areas.Admin.ViewModels.Task;
-using TaskStatus = AllReady.Models.TaskStatus;
 
 namespace AllReady.Areas.Admin.Features.Events
 {
@@ -43,14 +42,15 @@ namespace AllReady.Areas.Admin.Features.Events
                     EndDateTime = campaignEvent.EndDateTime,
                     IsLimitVolunteers = campaignEvent.IsLimitVolunteers,
                     IsAllowWaitList = campaignEvent.IsAllowWaitList,
-                    Location = campaignEvent.Location.ToEditModel(),                    
+                    Location = campaignEvent.Location.ToEditModel(),
                     ImageUrl = campaignEvent.ImageUrl,
-                    Tasks = campaignEvent.Tasks.Select(t => new TaskSummaryViewModel
+                    VolunteerTasks = campaignEvent.VolunteerTasks.Select(t => new TaskSummaryViewModel
                     {
                         Id = t.Id,
                         Name = t.Name,
                         StartDateTime = t.StartDateTime,
                         EndDateTime = t.EndDateTime,
+                        EventId = campaignEvent.Id,
                         NumberOfVolunteersRequired = t.NumberOfVolunteersRequired,
                         AssignedVolunteers = t.AssignedVolunteers?.Select(assignedVolunteer => new VolunteerViewModel
                         {
@@ -68,7 +68,13 @@ namespace AllReady.Areas.Admin.Features.Events
                         Date = i.Date,
                         TeamSize = i.TeamMembers.Count,
                         RequestCount = i.Requests.Count
-                    }).OrderBy(i => i.Date).ToList()
+                    }).OrderBy(i => i.Date).ToList(),
+                    EventManagerInvites = campaignEvent.ManagementInvites.Select(i => new EventDetailViewModel.EventManagerInviteList
+                    {
+                        Id = i.Id,
+                        InviteeEmail = i.InviteeEmailAddress,
+                        Status = GetEventManagerInviteStatus(i)
+                    })
                 };
 
                 // required skills
@@ -118,6 +124,9 @@ namespace AllReady.Areas.Admin.Features.Events
                         case RequestStatus.Canceled:
                             result.CanceledRequests = request.Count;
                             break;
+                        case RequestStatus.Requested:
+                            result.RequestedRequests = request.Count;
+                            break;
                     }
                 }
 
@@ -127,17 +136,18 @@ namespace AllReady.Areas.Admin.Features.Events
                     result.PendingConfirmationRequests +
                     result.ConfirmedRequests +
                     result.CompletedRequests + 
-                    result.CanceledRequests;
+                    result.CanceledRequests +
+                    result.RequestedRequests;
 
-                result.VolunteersRequired = await _context.Tasks.Where(rec => rec.EventId == result.Id).SumAsync(rec => rec.NumberOfVolunteersRequired);
+                result.VolunteersRequired = await _context.VolunteerTasks.Where(rec => rec.EventId == result.Id).SumAsync(rec => rec.NumberOfVolunteersRequired);
 
-                var acceptedVolunteers = await _context.Tasks
+                var acceptedVolunteers = await _context.VolunteerTasks
                     .AsNoTracking()
                     .Include(rec => rec.AssignedVolunteers)
                     .Where(rec => rec.EventId == result.Id)
                     .ToListAsync();
 
-                result.AcceptedVolunteers = acceptedVolunteers.Sum(x => x.AssignedVolunteers.Count(v => v.Status == TaskStatus.Accepted));
+                result.AcceptedVolunteers = acceptedVolunteers.Sum(x => x.AssignedVolunteers.Count(v => v.Status == VolunteerTaskStatus.Accepted));
             }
 
             return result;
@@ -148,12 +158,21 @@ namespace AllReady.Areas.Admin.Features.Events
             return await _context.Events
                 .AsNoTracking()
                 .Include(a => a.Campaign).ThenInclude(c => c.ManagingOrganization)
-                .Include(a => a.Tasks).ThenInclude(t => t.AssignedVolunteers).ThenInclude(av => av.User)
+                .Include(a => a.VolunteerTasks).ThenInclude(t => t.AssignedVolunteers).ThenInclude(av => av.User)
                 .Include(a => a.RequiredSkills).ThenInclude(s => s.Skill).ThenInclude(s => s.ParentSkill)
                 .Include(a => a.Location)
                 .Include(a => a.Itineraries).ThenInclude(a => a.TeamMembers)
                 .Include(a => a.Itineraries).ThenInclude(a => a.Requests)
+                .Include(a => a.ManagementInvites)
                 .SingleOrDefaultAsync(a => a.Id == message.EventId);
+        }
+
+        private EventDetailViewModel.EventManagerInviteStatus GetEventManagerInviteStatus(AllReady.Models.EventManagerInvite eventManagerInvite)
+        {
+            if (eventManagerInvite.IsAccepted) return EventDetailViewModel.EventManagerInviteStatus.Accepted;
+            else if (eventManagerInvite.IsPending) return EventDetailViewModel.EventManagerInviteStatus.Pending;
+            else if (eventManagerInvite.IsRejected) return EventDetailViewModel.EventManagerInviteStatus.Rejected;
+            else return EventDetailViewModel.EventManagerInviteStatus.Revoked;
         }
     }
 }

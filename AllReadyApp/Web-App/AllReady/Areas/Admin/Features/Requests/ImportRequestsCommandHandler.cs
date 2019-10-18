@@ -1,21 +1,22 @@
 ﻿using System;
 using AllReady.Models;
-using Geocoding;
 using MediatR;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.Tasks;
+using AllReady.Services.Mapping;
+using AllReady.Services.Mapping.GeoCoding;
 
 namespace AllReady.Areas.Admin.Features.Requests
 {
     public class ImportRequestsCommandHandler : AsyncRequestHandler<ImportRequestsCommand>
     {
         private readonly AllReadyContext context;
-        private readonly IGeocoder geocoder;
+        private readonly IGeocodeService geocoder;
         public Func<Guid> NewRequestId = () => Guid.NewGuid();
         public Func<DateTime> DateTimeUtcNow = () => DateTime.UtcNow;
 
-        public ImportRequestsCommandHandler(AllReadyContext context, IGeocoder geocoder)
+        public ImportRequestsCommandHandler(AllReadyContext context, IGeocodeService geocoder)
         {
             this.context = context;
             this.geocoder = geocoder;
@@ -45,7 +46,7 @@ namespace AllReady.Areas.Admin.Features.Requests
                     Name = viewModel.Name,
                     Phone = viewModel.Phone,
                     State = viewModel.State,
-                    Zip = viewModel.Zip,
+                    PostalCode = viewModel.PostalCode,
                     Status = RequestStatus.Unassigned,
                     Source = RequestSource.Csv
                 }).ToList();
@@ -57,10 +58,10 @@ namespace AllReady.Areas.Admin.Features.Requests
                 {
                     if (request.Latitude == 0 && request.Longitude == 0)
                     {
-                        //Assume the first returned address is correct
-                        var address = geocoder.Geocode(request.Address, request.City, request.State, request.Zip, string.Empty).FirstOrDefault();
-                        request.Latitude = address?.Coordinates.Latitude ?? 0;
-                        request.Longitude = address?.Coordinates.Longitude ?? 0;
+                        var coordinates = await geocoder.GetCoordinatesFromAddress(request.Address, request.City, request.State, request.PostalCode, string.Empty);
+
+                        request.Latitude = coordinates?.Latitude ?? 0;
+                        request.Longitude = coordinates?.Longitude ?? 0;
                     }
                 }
 

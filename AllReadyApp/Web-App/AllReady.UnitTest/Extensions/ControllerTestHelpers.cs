@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Security.Claims;
 using AllReady.Models;
@@ -46,9 +46,9 @@ namespace AllReady.UnitTest.Extensions
         {
             SetFakeHttpContextIfNotAlreadySet(controller);
 
-            var identity = new ClaimsIdentity(new List<Claim> { new Claim(ClaimTypes.NameIdentifier, userId)}, new IdentityCookieOptions().ApplicationCookieAuthenticationScheme);
+            var identity = new ClaimsIdentity(new List<Claim> { new Claim(ClaimTypes.NameIdentifier, userId) }, IdentityConstants.ApplicationScheme);
             var claimsPrincipal = new ClaimsPrincipal(identity);
-           
+
             Mock.Get(controller.HttpContext).SetupGet(httpContext => httpContext.User).Returns(claimsPrincipal);
         }
 
@@ -119,6 +119,18 @@ namespace AllReady.UnitTest.Extensions
             return Mock.Get(controller.Response);
         }
 
+        public static Mock<IUrlHelper> GetMockIUrlHelper(this Controller controller)
+        {
+            SetFakeIUrlHelperIfNotAlreadySet(controller);
+            return Mock.Get(controller.Url);
+        }
+
+        private static void SetFakeIUrlHelperIfNotAlreadySet(Controller controller)
+        {
+            if (controller.Url == null)
+                controller.SetFakeIUrlHelper();
+        }
+
         public static Mock<IUrlHelper> SetFakeIUrlHelper(this Controller controller)
         {
             controller.Url = new Mock<IUrlHelper>().Object;
@@ -129,7 +141,7 @@ namespace AllReady.UnitTest.Extensions
         {
             var orgAdminClaims = new List<Claim>
             {
-                new Claim(AllReady.Security.ClaimTypes.UserType, Enum.GetName(typeof(UserType), UserType.OrgAdmin)),
+                new Claim(AllReady.Security.ClaimTypes.UserType, nameof(UserType.OrgAdmin)),
                 new Claim(AllReady.Security.ClaimTypes.Organization, organizationId)
             };
 
@@ -140,7 +152,7 @@ namespace AllReady.UnitTest.Extensions
 
         public static void MakeUserASiteAdmin(this Controller controller)
         {
-            var siteAdminClaim = new List<Claim> { new Claim(AllReady.Security.ClaimTypes.UserType, UserType.SiteAdmin.ToString()) };
+            var siteAdminClaim = new List<Claim> { new Claim(AllReady.Security.ClaimTypes.UserType, nameof(UserType.SiteAdmin)) };
 
             SetFakeHttpContextIfNotAlreadySet(controller);
             var claimsPrincipal = new ClaimsPrincipal(new ClaimsIdentity(siteAdminClaim));
@@ -149,7 +161,7 @@ namespace AllReady.UnitTest.Extensions
 
         public static void MakeUserNotAnOrgAdmin(this Controller controller)
         {
-            var claims = new List<Claim> { new Claim(AllReady.Security.ClaimTypes.UserType, Enum.GetName(typeof(UserType), UserType.BasicUser)) };
+            var claims = new List<Claim> { new Claim(AllReady.Security.ClaimTypes.UserType, nameof(UserType.BasicUser)) };
 
             SetFakeHttpContextIfNotAlreadySet(controller);
             var claimsPrincipal = new ClaimsPrincipal(new ClaimsIdentity(claims));

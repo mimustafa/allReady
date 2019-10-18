@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using AllReady.Areas.Admin.ViewModels.Campaign;
 using AllReady.Models;
 using AllReady.ViewModels.Event;
 
@@ -31,7 +32,7 @@ namespace AllReady.ViewModels.Campaign
             StartDate = campaign.StartDateTime;
             EndDate = campaign.EndDateTime;            
             Events = campaign.Events != null ? campaign.Events.ToViewModel() : Enumerable.Empty<EventViewModel>();
-            CampaignImpact = campaign.CampaignImpact;
+            CampaignGoals = campaign.CampaignGoals;
             ImageUrl = campaign.ImageUrl;
             HasPrivacyPolicy = !string.IsNullOrEmpty(campaign.ManagingOrganization?.PrivacyPolicy);
             PrivacyPolicyUrl = campaign.ManagingOrganization?.PrivacyPolicyUrl;
@@ -40,6 +41,26 @@ namespace AllReady.ViewModels.Campaign
             Headline = campaign.Headline;
             Published = campaign.Published;
 
+        }
+
+        public CampaignViewModel(CampaignSummaryViewModel from)
+        {
+            Name = from.Name;
+            Description = from.Description;
+            FullDescription = from.FullDescription;
+            ExternalUrl = from.ExternalUrl;
+            ExternalUrlText = from.ExternalUrlText;
+            ManagingOrganizationId = from.OrganizationId;
+            ManagingOrganizationName = from.OrganizationName;
+            ImageUrl = from.ImageUrl;
+            TimeZoneId = from.TimeZoneId;
+            StartDate = from.StartDate;
+            EndDate = from.EndDate;
+            Headline = from.Headline;
+            Featured = from.Featured;
+            Published = from.Published;
+            CampaignGoals = new List<CampaignGoal>();
+            Location = new Location(from.Location);
         }
 
         public int Id { get; set; }
@@ -79,7 +100,7 @@ namespace AllReady.ViewModels.Campaign
 
         public string ManagingOrganizationLogo { get; set; }
 
-        public CampaignImpact CampaignImpact { get; set; }
+        public List<CampaignGoal> CampaignGoals { get; set; }
 
         public List<CampaignSponsors> ParticipatingOrganizations { get; set; }
 
@@ -100,6 +121,7 @@ namespace AllReady.ViewModels.Campaign
         public string Headline { get; set; }
         public bool HasHeadline => !string.IsNullOrEmpty(Headline);
         public bool Published { get; set; }
+        public bool IsCampaignManager { get; set; }
     }
 
     public static class CampaignViewModelExtensions

@@ -1,4 +1,4 @@
-﻿// knockout binding for jquery.maskedinput plugin
+// knockout binding for jquery.maskedinput plugin
 ko.bindingHandlers.masked = {
     init: function (element, valueAccessor) {
         var value = valueAccessor(),
@@ -13,7 +13,7 @@ ko.bindingHandlers.accordion = {
         var options = ko.utils.unwrapObservable(value()) || {},
             toggleClass = "[data-toggle-accordion]",
             contentClass = ".collapse",
-            openItem = ko.utils.unwrapObservable(options.openItem) || false,
+            openItem = parseInt(ko.utils.unwrapObservable(options.openItem)),
             itemClass = "." + (ko.utils.unwrapObservable(options.item) || "panel-group"),
             accordionDirectionIconClass = "." + (ko.utils.unwrapObservable(options.itemIconDirection) || "accordion-icon-direction"),
             items = $(elem).find(contentClass);
@@ -42,7 +42,7 @@ ko.bindingHandlers.accordion = {
         });
 
         // if initial open item specified, expand it
-        if (openItem) {
+        if (openItem > -1) {
             items.eq(openItem).collapse("show");
         };
 
@@ -57,5 +57,54 @@ ko.bindingHandlers.accordion = {
 
             $accordionDirectionIcon.toggleClass("fa-caret-down fa-caret-up");
         }
+    }
+};
+
+function Daterange(begin, end, formattedDate) {
+    this.begin = begin;
+    this.end = end;
+    this.formattedDate = formattedDate;
+}
+
+// knockout binding for datepicker date
+ko.bindingHandlers.dateRangePicker = {
+
+    init: function (element, valueAccessor, allBindingsAccessor) {
+        //initialize daterangepicker with some optional options
+        var options = allBindingsAccessor().daterangepickerOptions || {};
+        $(element).daterangepicker(options);
+
+        //when a user changes the date, update the view model
+        ko.utils.registerEventHandler(element, "apply.daterangepicker", function (event, picker) {
+            var value = valueAccessor();
+            if (ko.isObservable(value)) {
+                var daterange = new Daterange();
+
+                if (picker.startDate && picker.endDate) {
+                    var format = options.locale.format;
+                    daterange.begin = picker.startDate;
+                    daterange.end = picker.endDate;
+                    daterange.formattedDate = picker.startDate.format(format) + ' - ' + picker.endDate.format(format);
+                }
+                $(element).val(daterange.formattedDate);
+                value(daterange);
+            }
+        });
+
+        //when a user cancels the date, update the view model
+        ko.utils.registerEventHandler(element, "cancel.daterangepicker", function (event, picker) {
+            $(element).val('');
+            var value = valueAccessor();
+            if (ko.isObservable(value)) {
+                value(new Daterange());
+            }
+        });
+
+        ko.utils.domNodeDisposal.addDisposeCallback(element, function () {
+            var picker = $(element).data('daterangepicker');
+            if (picker) {
+                picker.remove();
+            }
+        });
     }
 };

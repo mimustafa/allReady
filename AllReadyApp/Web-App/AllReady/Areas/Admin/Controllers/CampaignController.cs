@@ -1,6 +1,5 @@
-using System;
-using System.Threading.Tasks;
 using AllReady.Areas.Admin.Features.Campaigns;
+using AllReady.Areas.Admin.ViewModels.Campaign;
 using AllReady.Extensions;
 using AllReady.Models;
 using AllReady.Security;
@@ -9,26 +8,33 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using AllReady.Areas.Admin.ViewModels.Campaign;
+using System;
+using System.Threading.Tasks;
+using AllReady.Areas.Admin.ViewModels.Validators;
+using AllReady.Constants;
+using AllReady.ViewModels.Campaign;
 
 namespace AllReady.Areas.Admin.Controllers
 {
-    [Area("Admin")]
-    [Authorize("OrgAdmin")]
+    [Area(AreaNames.Admin)]
+    [Authorize]
     public class CampaignController : Controller
     {
         public Func<DateTime> DateTimeNow = () => DateTime.Now;
 
         private readonly IMediator _mediator;
         private readonly IImageService _imageService;
-        
-        public CampaignController(IMediator mediator, IImageService imageService)
+        private readonly IImageSizeValidator _imageSizeValidator;
+
+        public CampaignController(IMediator mediator, IImageService imageService, IImageSizeValidator imageSizeValidator)
         {
             _mediator = mediator;
             _imageService = imageService;
+            _imageSizeValidator = imageSizeValidator;
         }
 
         // GET: Campaign
+        [Authorize(nameof(UserType.OrgAdmin))]
         public async Task<IActionResult> Index()
         {
             var query = new IndexQuery();
@@ -48,9 +54,10 @@ namespace AllReady.Areas.Admin.Controllers
                 return NotFound();
             }
 
-            if (!User.IsOrganizationAdmin(viewModel.OrganizationId))
+            var authorizableCampaign = await _mediator.SendAsync(new AuthorizableCampaignQuery(viewModel.Id));
+            if (!await authorizableCampaign.UserCanView())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             return View(viewModel);
@@ -60,16 +67,18 @@ namespace AllReady.Areas.Admin.Controllers
         [ValidateAntiForgeryToken]
         public PartialViewResult CampaignPreview(CampaignSummaryViewModel campaign, IFormFile fileUpload)
         {
-            return PartialView("_CampaignPreview", campaign);
+            return PartialView("_CampaignPreview", new CampaignViewModel(campaign));
         }
 
         // GET: Campaign/Create
+        [Authorize(nameof(UserType.OrgAdmin))]
         public IActionResult Create()
         {
             return View("Edit", new CampaignSummaryViewModel
             {
                 StartDate = DateTimeNow(),
-                EndDate = DateTimeNow().AddMonths(1)
+                EndDate = DateTimeNow().AddMonths(1),
+                TimeZoneId = User.GetTimeZoneId()
             });
         }
 
@@ -82,9 +91,10 @@ namespace AllReady.Areas.Admin.Controllers
                 return NotFound();
             }
 
-            if (!User.IsOrganizationAdmin(viewModel.OrganizationId))
+            var authorizableCampaign = await _mediator.SendAsync(new AuthorizableCampaignQuery(viewModel.Id));
+            if (!await authorizableCampaign.UserCanView())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             return View(viewModel);
@@ -100,9 +110,20 @@ namespace AllReady.Areas.Admin.Controllers
                 return BadRequest();
             }
 
-            if (!User.IsOrganizationAdmin(campaign.OrganizationId))
+            if (campaign.Id == 0)
             {
-                return Unauthorized();
+                if (!User.IsOrganizationAdmin(campaign.OrganizationId))
+                {
+                    return new ForbidResult();
+                }
+            }
+            else
+            {
+                var authorizableCampaign = await _mediator.SendAsync(new AuthorizableCampaignQuery(campaign.Id));
+                if (!await authorizableCampaign.UserCanEdit())
+                {
+                    return new ForbidResult();
+                }
             }
 
             if (campaign.EndDate < campaign.StartDate)
@@ -114,29 +135,33 @@ namespace AllReady.Areas.Admin.Controllers
             {
                 if (fileUpload != null)
                 {
-                    if (fileUpload.IsAcceptableImageContentType())
-                    {
-                        var existingImageUrl = campaign.ImageUrl;
-                        var newImageUrl = await _imageService.UploadCampaignImageAsync(campaign.OrganizationId, campaign.Id, fileUpload);
-                        if (!string.IsNullOrEmpty(newImageUrl))
-                        {
-                            campaign.ImageUrl = newImageUrl;
-                            if (existingImageUrl != null)
-                            {
-                                await _imageService.DeleteImageAsync(existingImageUrl);
-                            }
-                        }
-                    }
-                    else
+                    if (!fileUpload.IsAcceptableImageContentType())
                     {
                         ModelState.AddModelError("ImageUrl", "You must upload a valid image file for the logo (.jpg, .png, .gif)");
                         return View(campaign);
+                    }
+
+                    if (_imageSizeValidator != null && fileUpload.Length > _imageSizeValidator.FileSizeInBytes)
+                    {
+                        ModelState.AddModelError("ImageUrl", $"File size must be less than {_imageSizeValidator.BytesToMb():#,##0.00}MB!");
+                        return View(campaign);
+                    }
+
+                    var existingImageUrl = campaign.ImageUrl;
+                    var newImageUrl = await _imageService.UploadCampaignImageAsync(campaign.OrganizationId, campaign.Id, fileUpload);
+                    if (!string.IsNullOrEmpty(newImageUrl))
+                    {
+                        campaign.ImageUrl = newImageUrl;
+                        if (existingImageUrl != null && existingImageUrl != newImageUrl)
+                        {
+                            await _imageService.DeleteImageAsync(existingImageUrl);
+                        }
                     }
                 }
 
                 var id = await _mediator.SendAsync(new EditCampaignCommand { Campaign = campaign });
 
-                return RedirectToAction(nameof(Details), new { area = "Admin", id });
+                return RedirectToAction(nameof(Details), new { area = AreaNames.Admin, id });
             }
 
             return View(campaign);
@@ -151,13 +176,13 @@ namespace AllReady.Areas.Admin.Controllers
                 return NotFound();
             }
 
-            if (!User.IsOrganizationAdmin(viewModel.OrganizationId))
+            var authorizableOrganization = await _mediator.SendAsync(new Features.Organizations.AuthorizableOrganizationQuery(viewModel.OrganizationId));
+            if (!await authorizableOrganization.UserCanDelete())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             viewModel.Title = $"Delete campaign {viewModel.Name}";
-            viewModel.UserIsOrgAdmin = true;
 
             return View(viewModel);
         }
@@ -165,16 +190,18 @@ namespace AllReady.Areas.Admin.Controllers
         // POST: Campaign/Delete/5
         [HttpPost, ActionName("Delete")]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteConfirmed(DeleteViewModel viewModel)
+        public async Task<IActionResult> DeleteConfirmed(int id)
         {
-            if (!viewModel.UserIsOrgAdmin)
+            var viewModel = await _mediator.SendAsync(new CampaignSummaryQuery { CampaignId = id });
+            var authorizableOrganization = await _mediator.SendAsync(new Features.Organizations.AuthorizableOrganizationQuery(viewModel.OrganizationId));
+            if (!await authorizableOrganization.UserCanDelete())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
-            await _mediator.SendAsync(new DeleteCampaignCommand { CampaignId = viewModel.Id });
+            await _mediator.SendAsync(new DeleteCampaignCommand { CampaignId = id });
 
-            return RedirectToAction(nameof(Index), new { area = "Admin" });
+            return RedirectToAction(nameof(Index), new { area = AreaNames.Admin });
         }
 
         [HttpPost]
@@ -188,7 +215,8 @@ namespace AllReady.Areas.Admin.Controllers
                 return Json(new { status = "NotFound" });
             }
 
-            if (!User.IsOrganizationAdmin(campaign.OrganizationId))
+            var authorizableCampaign = await _mediator.SendAsync(new AuthorizableCampaignQuery(campaign.Id));
+            if (!await authorizableCampaign.UserCanEdit())
             {
                 return Json(new { status = "Unauthorized" });
             }
@@ -218,9 +246,10 @@ namespace AllReady.Areas.Admin.Controllers
                 return NotFound();
             }
 
-            if (!User.IsOrganizationAdmin(viewModel.OrganizationId))
+            var authorizableCampaign = await _mediator.SendAsync(new AuthorizableCampaignQuery(viewModel.Id));
+            if (!await authorizableCampaign.UserCanView())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             viewModel.Title = $"Publish campaign {viewModel.Name}";
@@ -234,28 +263,30 @@ namespace AllReady.Areas.Admin.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> PublishConfirmed(PublishViewModel viewModel)
         {
-            if (!viewModel.UserIsOrgAdmin)
+            var authorizableCampaign = await _mediator.SendAsync(new AuthorizableCampaignQuery(viewModel.Id));
+            if (!await authorizableCampaign.UserCanEdit())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             await _mediator.SendAsync(new PublishCampaignCommand { CampaignId = viewModel.Id });
 
-            return RedirectToAction(nameof(Index), new { area = "Admin" });
+            return RedirectToAction(nameof(Index), new { area = AreaNames.Admin });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [Authorize(nameof(UserType.OrgAdmin))]
         public async Task<IActionResult> LockUnlock(int id)
         {
             if (!User.IsUserType(UserType.SiteAdmin))
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             await _mediator.SendAsync(new LockUnlockCampaignCommand { CampaignId = id });
 
-            return RedirectToAction(nameof(Details), new { area = "Admin", id });
+            return RedirectToAction(nameof(Details), new { area = AreaNames.Admin, id });
         }
     }
 }

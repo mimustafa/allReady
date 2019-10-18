@@ -1,39 +1,42 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using AllReady.Areas.Admin.Features.Events;
 using AllReady.Areas.Admin.Features.Itineraries;
-using AllReady.Areas.Admin.Features.Organizations;
 using AllReady.Areas.Admin.Features.Requests;
 using AllReady.Areas.Admin.Features.TaskSignups;
 using AllReady.Areas.Admin.ViewModels.Itinerary;
 using AllReady.Areas.Admin.ViewModels.Request;
 using AllReady.Areas.Admin.ViewModels.Validators;
+using AllReady.Caching;
 using AllReady.Models;
-using AllReady.Security;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using AllReady.Constants;
 
 namespace AllReady.Areas.Admin.Controllers
 {
-    [Area("Admin")]
-    [Authorize("OrgAdmin")]
+    [Area(AreaNames.Admin)]
+    [Authorize]
     public class ItineraryController : Controller
     {
         private readonly IMediator _mediator;
         private readonly IItineraryEditModelValidator _itineraryValidator;
+        private readonly UserManager<ApplicationUser> _userManager;
 
-        public ItineraryController(IMediator mediator, IItineraryEditModelValidator itineraryValidator)
+        public ItineraryController(IMediator mediator, IItineraryEditModelValidator itineraryValidator, UserManager<ApplicationUser> userManager)
         {
             _mediator = mediator;
             _itineraryValidator = itineraryValidator;
+            _userManager = userManager;
         }
 
         [HttpGet]
         [Route("Admin/Itinerary/Details/{id}")]
-        public async Task<IActionResult> Details(int id)
+        public async Task<IActionResult> Details(int id, bool? teamLeadSuccess = null)
         {
             var itinerary = await _mediator.SendAsync(new ItineraryDetailQuery { ItineraryId = id });
             if (itinerary == null)
@@ -41,10 +44,18 @@ namespace AllReady.Areas.Admin.Controllers
                 return NotFound();
             }
 
-            if (!User.IsOrganizationAdmin(itinerary.OrganizationId))
+            var user = await _userManager.GetUserAsync(User);
+
+            itinerary.OptimizeRouteStatus = _mediator.Send(new OptimizeRouteResultStatusQuery(user?.Id, id));
+
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(id));
+            if (!await authorizableItinerary.UserCanView())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
+
+            itinerary.TeamLeadChangedSuccess = teamLeadSuccess;
+            itinerary.TeamManagementEnabled = await authorizableItinerary.UserCanManageTeamMembers();
 
             return View("Details", itinerary);
         }
@@ -54,15 +65,16 @@ namespace AllReady.Areas.Admin.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Details(int id, string requestKeywords, RequestStatus? requestStatus)
         {
-            var itinerary = await _mediator.SendAsync(new ItineraryDetailQuery {ItineraryId = id});
+            var itinerary = await _mediator.SendAsync(new ItineraryDetailQuery { ItineraryId = id });
             if (itinerary == null)
             {
                 return NotFound();
             }
 
-            if (!User.IsOrganizationAdmin(itinerary.OrganizationId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(id));
+            if (!await authorizableItinerary.UserCanEdit())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             var filteredRequests = await _mediator.SendAsync(new RequestListItemsQuery
@@ -96,9 +108,10 @@ namespace AllReady.Areas.Admin.Controllers
                 return BadRequest();
             }
 
-            if (!User.IsOrganizationAdmin(campaignEvent.OrganizationId))
+            var authorizableEvent = await _mediator.SendAsync(new AuthorizableEventQuery(campaignEvent.Id));
+            if (!await authorizableEvent.UserCanEdit())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             var errors = _itineraryValidator.Validate(model, campaignEvent);
@@ -127,9 +140,10 @@ namespace AllReady.Areas.Admin.Controllers
                 return BadRequest();
             }
 
-            if (!User.IsOrganizationAdmin(itinerary.OrganizationId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(id));
+            if (!await authorizableItinerary.UserCanView())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             ViewBag.Title = "Edit " + itinerary.Name;
@@ -152,9 +166,10 @@ namespace AllReady.Areas.Admin.Controllers
                 return BadRequest();
             }
 
-            if (!User.IsOrganizationAdmin(itinerary.OrganizationId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(model.Id));
+            if (!await authorizableItinerary.UserCanEdit())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             model.Date = itinerary.Date; // we currently don't allow the date to be changed via edit
@@ -170,56 +185,35 @@ namespace AllReady.Areas.Admin.Controllers
 
             await _mediator.SendAsync(new EditItineraryCommand { Itinerary = model });
 
-            return RedirectToAction(nameof(Details), new { area = "Admin", id = model.Id });
+            return RedirectToAction(nameof(Details), new { area = AreaNames.Admin, id = model.Id });
         }
 
         [HttpPost]
         [Route("Admin/Itinerary/AddTeamMember")]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddTeamMember(int id, int selectedTeamMember)
+        public async Task<IActionResult> AddTeamMember(int itineraryId, int selectedTeamMember)
         {
-            var orgId = await GetOrganizationIdBy(id);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageTeamMembers())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
-            if (id == 0 || selectedTeamMember == 0)
-            {
-                return Json(new
-                {
-                    isSuccess = false,
-                    errors = new[] {"Invalid selection."}
-                });
-            }
+            var result = await _mediator.SendAsync(new AddTeamMemberCommand { ItineraryId = itineraryId, VolunteerTaskSignupId = selectedTeamMember });
 
-            var isSuccess = await _mediator.SendAsync(new AddTeamMemberCommand { ItineraryId = id, TaskSignupId = selectedTeamMember });
-            if (!isSuccess)
-            {
-                return Json(new
-                {
-                    isSuccess = false,
-                    errors = new[] {"Invalid itinerary."}
-                });
-            }
+            // TODO - see comment in RemoveTeamLead method regarding passing message between requests
 
-            var detail = await _mediator.SendAsync(new ItineraryDetailQuery {ItineraryId = id});
-            return Json(new
-            {
-                isSuccess = true,
-                teamMembers = detail.TeamMembers,
-                potentialTeamMembers = detail.PotentialTeamMembers
-            });
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
         }
 
         [HttpGet]
         [Route("Admin/Itinerary/{id}/[Action]")]
         public async Task<IActionResult> SelectRequests(int id)
         {
-            var orgId = await GetOrganizationIdBy(id);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(id));
+            if (!await authorizableItinerary.UserCanView())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             var model = await BuildSelectItineraryRequestsModel(id, new RequestSearchCriteria { Status = RequestStatus.Unassigned });
@@ -243,10 +237,10 @@ namespace AllReady.Areas.Admin.Controllers
         public async Task<IActionResult> AddRequests(int id, List<string> selectedRequests)
         {
             // todo - error handling
-            var orgId = await GetOrganizationIdBy(id);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(id));
+            if (!await authorizableItinerary.UserCanManageRequests())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             if (selectedRequests.Any())
@@ -258,16 +252,16 @@ namespace AllReady.Areas.Admin.Controllers
         }
 
         [HttpGet]
-        [Route("Admin/Itinerary/{itineraryId}/[Action]/{taskSignupId}")]
-        public async Task<IActionResult> ConfirmRemoveTeamMember(int itineraryId, int taskSignupId)
+        [Route("Admin/Itinerary/{itineraryId}/[Action]/{volunteerTaskSignupId}")]
+        public async Task<IActionResult> ConfirmRemoveTeamMember(int itineraryId, int volunteerTaskSignupId)
         {
-            var orgId = await GetOrganizationIdBy(itineraryId);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanView())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
-            var viewModel = await _mediator.SendAsync(new TaskSignupSummaryQuery { TaskSignupId = taskSignupId });
+            var viewModel = await _mediator.SendAsync(new VolunteerTaskSignupSummaryQuery { VolunteerTaskSignupId = volunteerTaskSignupId });
             if (viewModel == null)
             {
                 return NotFound();
@@ -283,14 +277,15 @@ namespace AllReady.Areas.Admin.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         [Route("Admin/Itinerary/{itineraryId}/[Action]/{taskSignupId}")]
-        public async Task<IActionResult> RemoveTeamMember(TaskSignupSummaryViewModel viewModel)
+        public async Task<IActionResult> RemoveTeamMember(VolunteerTaskSignupSummaryViewModel viewModel)
         {
-            if (!viewModel.UserIsOrgAdmin)
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(viewModel.ItineraryId));
+            if (!await authorizableItinerary.UserCanManageTeamMembers())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
-            await _mediator.SendAsync(new RemoveTeamMemberCommand { TaskSignupId = viewModel.TaskSignupId });
+            await _mediator.SendAsync(new RemoveTeamMemberCommand { VolunteerTaskSignupId = viewModel.VolunteerTaskSignupId });
 
             return RedirectToAction(nameof(Details), new { id = viewModel.ItineraryId });
         }
@@ -299,22 +294,22 @@ namespace AllReady.Areas.Admin.Controllers
         [Route("Admin/Itinerary/{itineraryId}/[Action]/{requestId}")]
         public async Task<IActionResult> ConfirmRemoveRequest(int itineraryId, Guid requestId)
         {
-            var orgId = await GetOrganizationIdBy(itineraryId);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanView())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
-            var  viewModel = await _mediator.SendAsync(new RequestSummaryQuery { RequestId = requestId });
+            var viewModel = await _mediator.SendAsync(new RequestSummaryQuery { RequestId = requestId });
             if (viewModel == null)
             {
                 return NotFound();
             }
 
-            viewModel.Title =$"Remove request: {viewModel.Name}";
+            viewModel.Title = $"Remove request: {viewModel.Name}";
             viewModel.UserIsOrgAdmin = true;
 
-            return View("ConfirmRemoveRequest",  viewModel);
+            return View("ConfirmRemoveRequest", viewModel);
         }
 
         [HttpPost]
@@ -322,9 +317,9 @@ namespace AllReady.Areas.Admin.Controllers
         [Route("Admin/Itinerary/{itineraryId}/[Action]/{requestId}")]
         public async Task<IActionResult> RemoveRequest(RequestSummaryViewModel viewModel)
         {
-            if(!viewModel.UserIsOrgAdmin)
+            if (!viewModel.UserIsOrgAdmin)
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             await _mediator.SendAsync(new RemoveRequestCommand { RequestId = viewModel.Id, ItineraryId = viewModel.ItineraryId });
@@ -337,15 +332,15 @@ namespace AllReady.Areas.Admin.Controllers
         [Route("Admin/Itinerary/{itineraryId}/[Action]/{requestId}")]
         public async Task<IActionResult> MoveRequestUp(int itineraryId, Guid requestId)
         {
-            var orgId = await GetOrganizationIdBy(itineraryId);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageRequests())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             await _mediator.SendAsync(new ReorderRequestCommand { RequestId = requestId, ItineraryId = itineraryId, ReOrderDirection = ReorderRequestCommand.Direction.Up });
 
-            return RedirectToAction("Details", new { id = itineraryId });
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
         }
 
         [HttpPost]
@@ -353,15 +348,15 @@ namespace AllReady.Areas.Admin.Controllers
         [Route("Admin/Itinerary/{itineraryId}/[Action]/{requestId}")]
         public async Task<IActionResult> MoveRequestDown(int itineraryId, Guid requestId)
         {
-            var orgId = await GetOrganizationIdBy(itineraryId);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageRequests())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             await _mediator.SendAsync(new ReorderRequestCommand { RequestId = requestId, ItineraryId = itineraryId, ReOrderDirection = ReorderRequestCommand.Direction.Down });
 
-            return RedirectToAction("Details", new { id = itineraryId });
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
         }
 
         [HttpPost]
@@ -369,15 +364,15 @@ namespace AllReady.Areas.Admin.Controllers
         [Route("Admin/Itinerary/{itineraryId}/[Action]/{requestId}")]
         public async Task<IActionResult> MarkComplete(int itineraryId, Guid requestId)
         {
-            var orgId = await GetOrganizationIdBy(itineraryId);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageRequests())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
-            await _mediator.SendAsync(new ChangeRequestStatusCommand { RequestId = requestId, NewStatus = RequestStatus.Completed});
+            await _mediator.SendAsync(new ChangeRequestStatusCommand { RequestId = requestId, NewStatus = RequestStatus.Completed });
 
-            return RedirectToAction("Details", new { id = itineraryId });
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
         }
 
         [HttpPost]
@@ -385,15 +380,45 @@ namespace AllReady.Areas.Admin.Controllers
         [Route("Admin/Itinerary/{itineraryId}/[Action]/{requestId}")]
         public async Task<IActionResult> MarkIncomplete(int itineraryId, Guid requestId)
         {
-            var orgId = await GetOrganizationIdBy(itineraryId);
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageRequests())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
             await _mediator.SendAsync(new ChangeRequestStatusCommand { RequestId = requestId, NewStatus = RequestStatus.Assigned });
 
-            return RedirectToAction("Details", new { id = itineraryId });
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Route("Admin/Itinerary/{itineraryId}/[Action]/{requestId}")]
+        public async Task<IActionResult> MarkConfirmed(int itineraryId, Guid requestId)
+        {
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageRequests())
+            {
+                return new ForbidResult();
+            }
+
+            await _mediator.SendAsync(new ChangeRequestStatusCommand { RequestId = requestId, NewStatus = RequestStatus.Confirmed });
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Route("Admin/Itinerary/{itineraryId}/[Action]/{requestId}")]
+        public async Task<IActionResult> MarkUnassigned(int itineraryId, Guid requestId)
+        {
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageRequests())
+            {
+                return new ForbidResult();
+            }
+
+            await _mediator.SendAsync(new ChangeRequestStatusCommand { RequestId = requestId, NewStatus = RequestStatus.Unassigned });
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
         }
 
         [HttpPost]
@@ -401,16 +426,59 @@ namespace AllReady.Areas.Admin.Controllers
         [Route("Admin/Itinerary/{itineraryId}/[Action]")]
         public async Task<IActionResult> OptimizeRoute(int itineraryId, OptimizeRouteInputModel model)
         {
-            var orgId = await GetOrganizationIdBy(itineraryId);
-
-            if (orgId == 0 || !User.IsOrganizationAdmin(orgId))
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanEdit())
             {
-                return Unauthorized();
+                return new ForbidResult();
             }
 
-            await _mediator.SendAsync(new OptimizeRouteCommand { ItineraryId = itineraryId });
+            var user = await _userManager.GetUserAsync(User);
 
-            return RedirectToAction("Details", new { id = itineraryId, startAddress = model.StartAddress, endAddress = model.EndAddress });
+            await _mediator.SendAsync(new OptimizeRouteCommand { ItineraryId = itineraryId, UserId = user?.Id });
+
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Route("Admin/Itinerary/{itineraryId}/[Action]")]
+        public async Task<IActionResult> SetTeamLead(int itineraryId, [FromForm] int volunteerTaskSignupId)
+        {
+           
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageTeamMembers())
+            {
+                return new ForbidResult();
+            }
+
+            var itinUrl = Url.Action(nameof(this.Details), "Itinerary", new { area = AreaNames.Admin, id = itineraryId },
+                HttpContext.Request.Scheme);
+
+            var result = await _mediator.SendAsync(new SetTeamLeadCommand(itineraryId, volunteerTaskSignupId, itinUrl));
+
+            // todo - this method of sending messages between requests is not great - should look at properly implementing session and using TempData where possible
+
+            var isSuccess = result == SetTeamLeadResult.Success;
+
+            return RedirectToAction(nameof(Details), new { id = itineraryId, teamLeadSuccess = isSuccess });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Route("Admin/Itinerary/{itineraryId}/[Action]")]
+        public async Task<IActionResult> RemoveTeamLead(int itineraryId)
+        {
+            var authorizableItinerary = await _mediator.SendAsync(new AuthorizableItineraryQuery(itineraryId));
+            if (!await authorizableItinerary.UserCanManageTeamMembers())
+            {
+                return new ForbidResult();
+            }
+
+            var result = await _mediator.SendAsync(new RemoveTeamLeadCommand(itineraryId));
+
+            // todo - this method of sending messages between requests is not great - should look at properly implementing session and using TempData where possible
+
+            return RedirectToAction(nameof(Details), new { id = itineraryId });
         }
 
         private async Task<SelectItineraryRequestsViewModel> BuildSelectItineraryRequestsModel(int itineraryId, RequestSearchCriteria criteria)
@@ -440,18 +508,13 @@ namespace AllReady.Areas.Admin.Controllers
                     Address = request.Address,
                     Latitude = request.Latitude,
                     Longitude = request.Longitude,
-                    Postcode = request.Postcode
+                    PostalCode = request.PostalCode
                 };
 
                 model.Requests.Add(selectItem);
             }
 
             return model;
-        }
-
-        private async Task<int> GetOrganizationIdBy(int intinerayId)
-        {
-            return await _mediator.SendAsync(new OrganizationIdQuery { ItineraryId = intinerayId });
         }
     }
 }

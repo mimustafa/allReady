@@ -1,4 +1,4 @@
-﻿using AllReady.Models;
+using AllReady.Models;
 using AllReady.Services;
 using MediatR;
 using System.Linq;
@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using AllReady.Areas.Admin.ViewModels.Itinerary;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
+using Microsoft.AspNetCore.Mvc.Rendering;
 
 namespace AllReady.Areas.Admin.Features.Itineraries
 {
@@ -28,9 +29,8 @@ namespace AllReady.Areas.Admin.Features.Itineraries
                 .AsNoTracking()
                 .Include(x => x.StartLocation)
                 .Include(x => x.EndLocation)
-                .Include(x => x.Event).ThenInclude(x => x.Campaign)
-                .Include(x => x.Event.Campaign.ManagingOrganization)
-                .Include(x => x.TeamMembers).ThenInclude(x => x.Task)
+                .Include(x => x.Event).ThenInclude(x => x.Campaign).ThenInclude(x => x.ManagingOrganization)
+                .Include(x => x.TeamMembers).ThenInclude(x => x.VolunteerTask)
                 .Include(x => x.Requests).ThenInclude(x => x.Request)
                 .Where(a => a.Id == message.ItineraryId)
                 .Select(i => new ItineraryDetailsViewModel
@@ -46,13 +46,18 @@ namespace AllReady.Areas.Admin.Features.Itineraries
                     StartAddress = i.StartLocation != null ? i.StartLocation.FullAddress : null,
                     EndAddress = GetEndAddress(i.StartLocation, i.EndLocation, i.UseStartAddressAsEndAddress),
                     UseStartAddressAsEndAddress = i.UseStartAddressAsEndAddress,
-                    TeamMembers = i.TeamMembers.Select(tm => new TeamListViewModel
-                    {
-                        TaskSignupId = tm.Id,
-                        VolunteerEmail = tm.User.Email,
-                        TaskName = tm.Task.Name,
-                        FullName = tm.User.Name
-                    }).ToList(),
+                    TeamMembers = i.TeamMembers
+                        .OrderBy(tm => tm.IsTeamLead != true)
+                        .ThenBy(tm => tm.User.LastName)
+                        .ThenBy(tm => tm.User.FirstName)
+                        .Select(tm => new TeamListViewModel
+                        {
+                            VolunteerTaskSignupId = tm.Id,
+                            VolunteerEmail = tm.User.Email,
+                            VolunteerTaskName = tm.VolunteerTask.Name,
+                            FullName = !string.IsNullOrWhiteSpace(tm.User.Name) ? $"{tm.User.LastName}, {tm.User.FirstName}" : "* Name Missing *",
+                            IsTeamLead = tm.IsTeamLead
+                        }).ToList(),
                     Requests = i.Requests.OrderBy(r => r.OrderIndex).Select(r => new RequestListViewModel
                     {
                         Id = r.Request.RequestId,
@@ -75,6 +80,17 @@ namespace AllReady.Areas.Admin.Features.Itineraries
             itineraryDetails.HasPotentialTeamMembers = potentialTeamMembers.Any();
             itineraryDetails.PotentialTeamMembers = potentialTeamMembers.AddNullOptionToFront("<Please select your next team member>");
 
+            var potentialTeamLeads = itineraryDetails.TeamMembers.Where(t => !t.IsTeamLead).Select(x => new SelectListItem { Text = x.FullName, Value = x.VolunteerTaskSignupId.ToString() }).ToList();
+
+            if (potentialTeamLeads.Any() && itineraryDetails.HasTeamLead)
+            {
+                itineraryDetails.PotentialTeamLeads = potentialTeamLeads.AddNullOptionToFront("<Select new team lead>");
+            }
+            else if (potentialTeamLeads.Any())
+            {
+                itineraryDetails.PotentialTeamLeads = potentialTeamLeads.AddNullOptionToFront("<Select a team lead>");
+            }
+
             if (!string.IsNullOrWhiteSpace(itineraryDetails.StartAddress) && !string.IsNullOrWhiteSpace(itineraryDetails.EndAddress))
             {
                 itineraryDetails.CanOptimizeAndDisplayRoute = true;
@@ -84,6 +100,7 @@ namespace AllReady.Areas.Admin.Features.Itineraries
             {
                 itineraryDetails.Requests[0].IsFirst = true;
                 itineraryDetails.Requests[itineraryDetails.Requests.Count - 1].IsLast = true;
+                itineraryDetails.HasAnyRequests = true;
 
                 BuildBingUrl(itineraryDetails);
             }
